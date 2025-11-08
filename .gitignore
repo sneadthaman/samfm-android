@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# Android Studio
+.idea/
+*.iml
+*.ipr
+*.iws
+local.properties
+.DS_Store
+
+# VSCode
+.vscode/
+.settings/
+
+# OS
+*.log
+*.tmp
+*.swp
+
+# Keystore (don’t commit your release key)
+*.keystore
+*.jks
+
+# Generated files
+app/release/
+app/debug/
