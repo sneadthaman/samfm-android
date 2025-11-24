@@ -12,7 +12,7 @@
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Material3.DayNight.NoActionBar"
+        android:theme="@style/Theme.Material3.DayNight.NoActionBar">
 
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
@@ -22,7 +22,7 @@
         </activity>
 
         <!-- lets Android route media button presses to our session -->
-        <receiver android:name="androidx.media.session.MediaButtonReceiver">
+        <receiver android:name="androidx.media.session.MediaButtonReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
@@ -30,7 +30,15 @@
 
         <service
             android:name=".PlayerService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback"/>
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 </manifest>

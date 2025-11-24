@@ -17,6 +17,9 @@ import java.net.URL;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -55,7 +58,7 @@ public class MainActivity extends AppCompatActivity {
             ContextCompat.startForegroundService(this, i);
         });
 
-        // Poll AzuraCast every 5s for UI (independent from service)
+        // Poll AzuraCast every 5s for UI (service handles session/notification)
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::pollNowPlaying, 0, 5, TimeUnit.SECONDS);
     }
@@ -67,10 +70,6 @@ public class MainActivity extends AppCompatActivity {
             if (code >= 300 && code < 400) {
                 String loc = res.header("Location", "");
                 if (loc == null || loc.isEmpty()) return "";
-                // If redirected to https on the IP, rewrite to http (dev only)
-                if (loc.startsWith("https://209.97.158.36")) {
-                    loc = loc.replace("https://", "http://");
-                }
                 res.close();
                 Request req2 = new Request.Builder().url(loc).build();
                 try (Response res2 = http.newCall(req2).execute()) {
@@ -81,16 +80,12 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-    
 
     private void pollNowPlaying() {
-        long t0 = System.currentTimeMillis();
         try {
             String body = fetchJsonHandlingRedirect(Constants.NOWPLAYING_URL);
-            final String sample = body.length() > 80 ? body.substring(0, 80) + "..." : body;
-
             if (body.isEmpty()) {
-                runOnUiThread(() -> { titleView.setText("SAM FM"); artistView.setText("NP empty"); });
+                runOnUiThread(() -> { titleView.setText("SAM FM"); artistView.setText("—"); });
                 return;
             }
 
@@ -106,7 +101,7 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) {
             runOnUiThread(() -> {
                 titleView.setText("SAM FM");
-                artistView.setText("NP error");
+                artistView.setText("—");
             });
         }
     }

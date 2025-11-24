@@ -18,6 +18,8 @@ android {
     buildFeatures { viewBinding true }
 
     compileOptions {
+    }
+    compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
@@ -44,4 +46,7 @@ dependencies {
 
     // (nice to have)
     implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.8.6"
+
+    // Media compat for MediaSessionCompat / NotificationCompat media style
+    implementation "androidx.media:media:1.6.0"
 }

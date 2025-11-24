@@ -2,11 +2,12 @@ package com.samfm.radio;
 
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
-import android.app.Service;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 
+import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.media3.common.AudioAttributes;
@@ -15,30 +16,41 @@ import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.Metadata;
 import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.session.LibraryResult;
+import androidx.media3.session.MediaLibraryService;
+import androidx.media3.session.MediaLibraryService.MediaLibrarySession;
 import androidx.media3.session.MediaSession;
+import androidx.media3.session.MediaStyleNotificationHelper;
 
+import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-public class PlayerService extends Service {
+public class PlayerService extends MediaLibraryService {
     public static final String ACTION_TOGGLE = "com.samfm.radio.TOGGLE";
     private static final String CHANNEL_ID = "radio";
     private static final int NOTIF_ID = 1;
+    private static final String ROOT_ID = "root";
+    private static final String MEDIA_ID_LIVE = "live";
 
     private ExoPlayer exo;
-    private MediaSession mediaSession;
+    private MediaLibrarySession mediaLibrarySession;
 
     private final OkHttpClient http = new OkHttpClient.Builder()
         .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-        .followRedirects(false)   // 👈 important: we'll handle redirects manually
+        .followRedirects(false)
         .build();
 
     private ScheduledExecutorService scheduler;
@@ -61,40 +73,27 @@ public class PlayerService extends Service {
         exo.setAudioAttributes(attrs, true);
         exo.setHandleAudioBecomingNoisy(true);
 
-        // Initial metadata
-        MediaMetadata initialMeta = new MediaMetadata.Builder()
-                .setTitle("SAM FM")
-                .setArtist("Live")
-                .build();
-
-        MediaItem item = new MediaItem.Builder()
-                .setUri(Uri.parse(Constants.STREAM_URL))
-                .setMediaMetadata(initialMeta)
-                .build();
-
+        MediaItem item = buildLiveItem("SAM FM", "Live", "");
         exo.setMediaItem(item);
         exo.prepare();
 
-        mediaSession = new MediaSession.Builder(this, exo).build();
+        mediaLibrarySession = new MediaLibrarySession.Builder(this, exo, new SessionCb())
+                .setSessionActivity(piContent())
+                .build();
 
-        // build the media-style notification with actions
         NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("SAM FM")
         .setContentText("Starting…")
-        .setContentIntent(piContent())                   // tap opens app
+        .setContentIntent(piContent())
         .setOngoing(true)
         .addAction(new NotificationCompat.Action(0, "Play/Pause", piToggle()))
-        .setStyle(new androidx.media.app.NotificationCompat.MediaStyle()
-            .setMediaSession(mediaSession.getSessionCompatToken())
-            .setShowActionsInCompactView(0)   // show the first action compact
-        );
+        .setStyle(new MediaStyleNotificationHelper.MediaStyle(mediaLibrarySession).setShowActionsInCompactView(0));
 
         startForeground(NOTIF_ID, nb.build());
 
         exo.play();
 
-        // ICY metadata fallback
         exo.addListener(new Player.Listener() {
             @Override public void onMetadata(Metadata metadata) {
                 String title = "";
@@ -121,7 +120,6 @@ public class PlayerService extends Service {
                         .build();
 
                 exo.setPlaylistMetadata(meta);
-
                 NotificationManager nm = getSystemService(NotificationManager.class);
                 NotificationCompat.Builder n2 = new NotificationCompat.Builder(PlayerService.this, CHANNEL_ID)
                         .setSmallIcon(R.mipmap.ic_launcher)
@@ -132,26 +130,38 @@ public class PlayerService extends Service {
             }
         });
 
-        // Poll AzuraCast API every 5s and push to session
         scheduler = Executors.newSingleThreadScheduledExecutor();
         scheduler.scheduleAtFixedRate(this::updateNowPlayingFromApi, 0, 5, TimeUnit.SECONDS);
+    }
+
+    private MediaItem buildLiveItem(String title, String artist, String art) {
+        MediaMetadata.Builder mb = new MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist);
+        if (art != null && !art.isEmpty()) {
+            mb.setArtworkUri(Uri.parse(art));
+        }
+        return new MediaItem.Builder()
+                .setMediaId(MEDIA_ID_LIVE)
+                .setUri(Uri.parse(Constants.STREAM_URL))
+                .setMediaMetadata(mb.build())
+                .build();
     }
 
     private void updateNowPlayingFromApi() {
         try {
             String body = fetchJsonHandlingRedirect(Constants.NOWPLAYING_URL);
             if (body == null || body.isEmpty()) return;
-    
+
             NowPlaying np = parseNowPlaying(body);
-    
+
             MediaMetadata.Builder mb = new MediaMetadata.Builder()
                     .setTitle(np.title.isEmpty() ? "Live" : np.title)
                     .setArtist(np.artist.isEmpty() ? "SAM FM" : np.artist);
             if (!np.artUrl.isEmpty()) mb.setArtworkUri(Uri.parse(np.artUrl));
             MediaMetadata meta = mb.build();
-    
+
             exo.setPlaylistMetadata(meta);
-    
             NotificationManager nm = getSystemService(NotificationManager.class);
             NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(R.mipmap.ic_launcher)
@@ -161,7 +171,6 @@ public class PlayerService extends Service {
             nm.notify(NOTIF_ID, nb.build());
         } catch (Throwable ignored) {}
     }
-    
 
     private NowPlaying parseNowPlaying(String body) {
         try {
@@ -200,7 +209,7 @@ public class PlayerService extends Service {
                 return res.body() != null ? res.body().string() : "";
             }
         }
-    }    
+    }
 
     private NowPlaying fromObjectShape(JSONObject root) {
         try {
@@ -226,19 +235,18 @@ public class PlayerService extends Service {
         } catch (Throwable __) { return null; }
     }
 
-    private android.app.PendingIntent piToggle() {
+    private PendingIntent piToggle() {
         Intent i = new Intent(this, PlayerService.class).setAction(ACTION_TOGGLE);
-        return android.app.PendingIntent.getService(this, 1, i,
-            android.os.Build.VERSION.SDK_INT >= 23 ? android.app.PendingIntent.FLAG_IMMUTABLE : 0);
-    }
-    
-    private android.app.PendingIntent piContent() {
+        return PendingIntent.getService(this, 1, i,
+            android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
+        }
+
+    private PendingIntent piContent() {
         Intent open = new Intent(this, MainActivity.class)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-        return android.app.PendingIntent.getActivity(this, 2, open,
-            android.os.Build.VERSION.SDK_INT >= 23 ? android.app.PendingIntent.FLAG_IMMUTABLE : 0);
+        return PendingIntent.getActivity(this, 2, open,
+            android.os.Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_IMMUTABLE : 0);
     }
-    
 
     @Override public int onStartCommand(@Nullable Intent intent, int flags, int startId) {
         if (intent != null && ACTION_TOGGLE.equals(intent.getAction())) {
@@ -249,12 +257,55 @@ public class PlayerService extends Service {
 
     @Override public void onDestroy() {
         if (scheduler != null) scheduler.shutdownNow();
-        try { mediaSession.release(); } catch (Throwable ignored) {}
+        try { mediaLibrarySession.release(); } catch (Throwable ignored) {}
         try { exo.release(); } catch (Throwable ignored) {}
         super.onDestroy();
     }
 
-    @Nullable @Override public android.os.IBinder onBind(Intent intent) { return null; }
+    @Nullable @Override public MediaLibrarySession onGetSession(MediaSession.ControllerInfo controllerInfo) {
+        return mediaLibrarySession;
+    }
+
+    private class SessionCb implements MediaLibrarySession.Callback {
+        @NonNull @Override
+        public ListenableFuture<LibraryResult<MediaItem>> onGetLibraryRoot(@NonNull MediaLibrarySession session, @NonNull MediaSession.ControllerInfo controller, @Nullable MediaLibraryService.LibraryParams params) {
+            MediaItem root = new MediaItem.Builder()
+                    .setMediaId(ROOT_ID)
+                    .setMediaMetadata(new MediaMetadata.Builder().setTitle("SAM FM").build())
+                    .build();
+            return Futures.immediateFuture(LibraryResult.ofItem(root, params));
+        }
+
+        @NonNull @Override
+        public ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> onGetChildren(@NonNull MediaLibrarySession session, @NonNull MediaSession.ControllerInfo controller, @NonNull String parentId, int page, int pageSize, @Nullable MediaLibraryService.LibraryParams params) {
+            if (!ROOT_ID.equals(parentId)) {
+                return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE));
+            }
+            List<MediaItem> children = new ArrayList<>();
+            MediaItem live = new MediaItem.Builder()
+                    .setMediaId(MEDIA_ID_LIVE)
+                    .setMediaMetadata(new MediaMetadata.Builder().setTitle("SAM FM Live").setArtist("24/7").build())
+                    .setUri(Uri.parse(Constants.STREAM_URL))
+                    .build();
+            children.add(live);
+            return Futures.immediateFuture(LibraryResult.ofItemList(ImmutableList.copyOf(children), params));
+        }
+
+        @NonNull @Override
+        public ListenableFuture<List<MediaItem>> onAddMediaItems(@NonNull MediaSession session, @NonNull MediaSession.ControllerInfo controller, @NonNull List<MediaItem> mediaItems) {
+            List<MediaItem> resolved = new ArrayList<>();
+            for (MediaItem mi : mediaItems) {
+                if (MEDIA_ID_LIVE.equals(mi.mediaId) || mi.requestMetadata.mediaUri != null) {
+                    resolved.add(new MediaItem.Builder()
+                            .setMediaId(MEDIA_ID_LIVE)
+                            .setUri(Uri.parse(Constants.STREAM_URL))
+                            .setMediaMetadata(new MediaMetadata.Builder().setTitle("SAM FM Live").setArtist("24/7").build())
+                            .build());
+                }
+            }
+            return Futures.immediateFuture(ImmutableList.copyOf(resolved));
+        }
+    }
 
     private static class NowPlaying {
         final String title, artist, artUrl;
