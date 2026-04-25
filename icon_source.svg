@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Vertical gradient: brighter at the peaks, richer green at centre -->
+    <linearGradient id="waveGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#6effa0"/>
+      <stop offset="50%"  stop-color="#1ed760"/>
+      <stop offset="100%" stop-color="#6effa0"/>
+    </linearGradient>
+    <!-- Clip everything to the circular icon boundary -->
+    <clipPath id="iconClip">
+      <circle cx="512" cy="512" r="500"/>
+    </clipPath>
+  </defs>
+
+  <!-- Background -->
+  <circle cx="512" cy="512" r="512" fill="#0e0e0e"/>
+
+  <!-- 15 equalizer bars — symmetric top/bottom, irregular heights, centred at y=512 -->
+  <!-- bar width = 38, gap = 12, row starts at x = 143                               -->
+  <g fill="url(#waveGrad)" clip-path="url(#iconClip)">
+    <!-- x positions: 143 193 243 293 343 393 443 493 543 593 643 693 743 793 843    -->
+    <!-- half-heights:  90 170 130 290 200 370 250 390 260 380 210 300 140 180  80   -->
+
+    <rect x="143" y="422" width="38" height="180" rx="19"/>
+    <rect x="193" y="342" width="38" height="340" rx="19"/>
+    <rect x="243" y="382" width="38" height="260" rx="19"/>
+    <rect x="293" y="222" width="38" height="580" rx="19"/>
+    <rect x="343" y="312" width="38" height="400" rx="19"/>
+    <rect x="393" y="142" width="38" height="740" rx="19"/>
+    <rect x="443" y="262" width="38" height="500" rx="19"/>
+    <rect x="493" y="122" width="38" height="780" rx="19"/>
+    <rect x="543" y="252" width="38" height="520" rx="19"/>
+    <rect x="593" y="132" width="38" height="760" rx="19"/>
+    <rect x="643" y="302" width="38" height="420" rx="19"/>
+    <rect x="693" y="212" width="38" height="600" rx="19"/>
+    <rect x="743" y="372" width="38" height="280" rx="19"/>
+    <rect x="793" y="332" width="38" height="360" rx="19"/>
+    <rect x="843" y="432" width="38" height="160" rx="19"/>
+  </g>
+</svg>

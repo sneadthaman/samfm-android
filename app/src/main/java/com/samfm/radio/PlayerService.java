@@ -6,6 +6,8 @@ import android.app.PendingIntent;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -46,6 +48,8 @@ public class PlayerService extends MediaLibraryService {
 
     private ExoPlayer exo;
     private MediaLibrarySession mediaLibrarySession;
+    private Handler mainHandler;
+    private volatile String lastArtUrl = "";
 
     private final OkHttpClient http = new OkHttpClient.Builder()
         .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
@@ -64,6 +68,7 @@ public class PlayerService extends MediaLibraryService {
                     CHANNEL_ID, "Radio Playback", NotificationManager.IMPORTANCE_LOW));
         }
 
+        mainHandler = new Handler(Looper.getMainLooper());
         exo = new ExoPlayer.Builder(this).build();
 
         AudioAttributes attrs = new AudioAttributes.Builder()
@@ -113,20 +118,8 @@ public class PlayerService extends MediaLibraryService {
                     }
                 }
                 if (title.isEmpty() && artist.isEmpty()) return;
-
-                MediaMetadata meta = new MediaMetadata.Builder()
-                        .setTitle(title.isEmpty() ? "Live" : title)
-                        .setArtist(artist.isEmpty() ? "SAM FM" : artist)
-                        .build();
-
-                exo.setPlaylistMetadata(meta);
-                NotificationManager nm = getSystemService(NotificationManager.class);
-                NotificationCompat.Builder n2 = new NotificationCompat.Builder(PlayerService.this, CHANNEL_ID)
-                        .setSmallIcon(R.mipmap.ic_launcher)
-                        .setContentTitle(title.isEmpty() ? "SAM FM" : title)
-                        .setContentText(artist.isEmpty() ? "Live" : artist)
-                        .setOngoing(true);
-                nm.notify(NOTIF_ID, n2.build());
+                // Use lastArtUrl as fallback since ICY metadata carries no artwork
+                applyMetadata(title, artist, lastArtUrl);
             }
         });
 
@@ -154,22 +147,43 @@ public class PlayerService extends MediaLibraryService {
             if (body == null || body.isEmpty()) return;
 
             NowPlaying np = parseNowPlaying(body);
+            lastArtUrl = np.artUrl;
+            applyMetadata(np.title, np.artist, np.artUrl);
+        } catch (Throwable ignored) {}
+    }
+
+    // Updates the current MediaItem metadata so that Bluetooth AVRCP (Tesla, etc.) picks up
+    // the track title and artist. setPlaylistMetadata() does NOT propagate to AVRCP;
+    // replaceMediaItem() with the same URI updates metadata in-place without rebuffering
+    // (Media3 1.2+). Must run on the main thread because ExoPlayer is not thread-safe.
+    private void applyMetadata(String title, String artist, String artUrl) {
+        mainHandler.post(() -> {
+            if (exo == null || mediaLibrarySession == null) return;
 
             MediaMetadata.Builder mb = new MediaMetadata.Builder()
-                    .setTitle(np.title.isEmpty() ? "Live" : np.title)
-                    .setArtist(np.artist.isEmpty() ? "SAM FM" : np.artist);
-            if (!np.artUrl.isEmpty()) mb.setArtworkUri(Uri.parse(np.artUrl));
-            MediaMetadata meta = mb.build();
+                    .setTitle(title.isEmpty() ? "Live" : title)
+                    .setArtist(artist.isEmpty() ? "SAM FM" : artist);
+            if (artUrl != null && !artUrl.isEmpty()) mb.setArtworkUri(Uri.parse(artUrl));
 
-            exo.setPlaylistMetadata(meta);
+            MediaItem updatedItem = new MediaItem.Builder()
+                    .setMediaId(MEDIA_ID_LIVE)
+                    .setUri(Uri.parse(Constants.STREAM_URL))
+                    .setMediaMetadata(mb.build())
+                    .build();
+            exo.replaceMediaItem(0, updatedItem);
+
             NotificationManager nm = getSystemService(NotificationManager.class);
             NotificationCompat.Builder nb = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(R.mipmap.ic_launcher)
-                    .setContentTitle(np.title.isEmpty() ? "SAM FM" : np.title)
-                    .setContentText(np.artist.isEmpty() ? "Live" : np.artist)
-                    .setOngoing(true);
+                    .setContentTitle(title.isEmpty() ? "SAM FM" : title)
+                    .setContentText(artist.isEmpty() ? "Live" : artist)
+                    .setContentIntent(piContent())
+                    .setOngoing(true)
+                    .addAction(new NotificationCompat.Action(0, "Play/Pause", piToggle()))
+                    .setStyle(new MediaStyleNotificationHelper.MediaStyle(mediaLibrarySession)
+                            .setShowActionsInCompactView(0));
             nm.notify(NOTIF_ID, nb.build());
-        } catch (Throwable ignored) {}
+        });
     }
 
     private NowPlaying parseNowPlaying(String body) {
